@@ -1,0 +1,242 @@
+# CyberPanel / OpenLiteSpeed (typical path: /home/<domain>/public_html)
+# Domain: digierp.cloud — override with secret GENX_REMOTE_DOMAIN if needed.
+#
+# Required GitHub repository secrets:
+#   GENX_SSH_HOST, GENX_SSH_PORT, GENX_SSH_USER, GENX_SSH_KEY
+#
+# Optional secrets:
+#   GENX_REMOTE_DOMAIN      (default: digierp.cloud)
+#   GENX_REMOTE_APP_DIR     (default: laravel — app lives in public_html/laravel)
+#   GENX_RUN_MIGRATIONS       (default: true)
+#   GENX_RUN_SEEDERS        (default: false)
+#   GENX_PHP_BIN            (optional) e.g. /usr/local/lsws/lsphp82/bin/php — defaults to php on PATH
+#   GENX_DOTENV_B64         (optional) base64-encoded full .env for first-time bootstrap only
+#
+# Server: create MySQL DB in CyberPanel, then place .env on the server (recommended), or set
+# GENX_DOTENV_B64 once for initial deploy — never commit real credentials to git.
+
+name: Deploy to CyberPanel (digierp.cloud)
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-cyberpanel-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      REMOTE_DOMAIN: ${{ secrets.GENX_REMOTE_DOMAIN || 'digierp.cloud' }}
+      REMOTE_APP_DIR: ${{ secrets.GENX_REMOTE_APP_DIR || 'laravel' }}
+      RUN_MIGRATIONS: ${{ secrets.GENX_RUN_MIGRATIONS || 'true' }}
+      RUN_SEEDERS: ${{ secrets.GENX_RUN_SEEDERS || 'false' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.GENX_SSH_KEY }}
+
+      - name: Add server to known_hosts
+        run: |
+          set -e
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${{ secrets.GENX_SSH_PORT }}" -H "${{ secrets.GENX_SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: SSH preflight
+        run: |
+          ssh -p "${{ secrets.GENX_SSH_PORT }}" \
+            -o StrictHostKeyChecking=yes \
+            -o IdentitiesOnly=yes \
+            "${{ secrets.GENX_SSH_USER }}@${{ secrets.GENX_SSH_HOST }}" \
+            "echo SSH OK: \$(whoami) on \$(hostname)"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies and build frontend (Vite)
+        run: |
+          set -e
+          npm ci
+          npm run build
+
+      - name: Prepare deploy artifacts (Laravel app + public docroot)
+        shell: bash
+        run: |
+          set -e
+          rm -rf deploy_app deploy_public
+          mkdir -p deploy_app deploy_public
+
+          for d in app bootstrap config database routes Modules; do
+            [ -d "$d" ] && cp -a "$d" deploy_app/
+          done
+          for f in artisan composer.json composer.lock phpunit.xml .htaccess; do
+            [ -f "$f" ] && cp -a "$f" deploy_app/
+          done
+          if [ -d lang ]; then cp -a lang deploy_app/; fi
+          mkdir -p deploy_app/resources
+          [ -d resources/lang ] && cp -a resources/lang deploy_app/resources/
+          [ -d resources/views ] && cp -a resources/views deploy_app/resources/
+
+          mkdir -p deploy_app/storage/app/public
+          mkdir -p deploy_app/storage/framework/{cache,sessions,views}
+          mkdir -p deploy_app/storage/logs
+          mkdir -p deploy_app/bootstrap/cache
+          touch deploy_app/storage/.gitignore
+
+          rsync -a public/ deploy_public/
+          mkdir -p deploy_app/public/build
+          if [ -d public/build ]; then rsync -a public/build/ deploy_public/build/; fi
+          if [ -d public/build ]; then rsync -a public/build/ deploy_app/public/build/; fi
+          if [ -f public/.htaccess ]; then cp -a public/.htaccess deploy_public/.htaccess; fi
+
+          cat > deploy_public/index.php <<'PHP'
+          <?php
+
+          use Illuminate\Contracts\Http\Kernel;
+          use Illuminate\Http\Request;
+
+          define('LARAVEL_START', microtime(true));
+
+          if (file_exists($maintenance = __DIR__ . '/laravel/storage/framework/maintenance.php')) {
+              require $maintenance;
+          }
+
+          define('LARAVEL_BASE', __DIR__ . '/laravel');
+
+          require LARAVEL_BASE . '/vendor/autoload.php';
+          $app = require LARAVEL_BASE . '/bootstrap/app.php';
+
+          /** @var Kernel $kernel */
+          $kernel = $app->make(Kernel::class);
+
+          $response = tap($kernel->handle(
+              $request = Request::capture()
+          ))->send();
+
+          $kernel->terminate($request, $response);
+          PHP
+
+      - name: Rsync application to server
+        run: |
+          set -e
+          RSYNC_SSH="ssh -p ${{ secrets.GENX_SSH_PORT }} -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes"
+          rsync -avz \
+            -e "$RSYNC_SSH" \
+            deploy_app/ "${{ secrets.GENX_SSH_USER }}@${{ secrets.GENX_SSH_HOST }}:/home/${{ env.REMOTE_DOMAIN }}/public_html/${{ env.REMOTE_APP_DIR }}/"
+
+      - name: Rsync public document root
+        run: |
+          set -e
+          RSYNC_SSH="ssh -p ${{ secrets.GENX_SSH_PORT }} -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes"
+          rsync -avz \
+            -e "$RSYNC_SSH" \
+            deploy_public/ "${{ secrets.GENX_SSH_USER }}@${{ secrets.GENX_SSH_HOST }}:/home/${{ env.REMOTE_DOMAIN }}/public_html/"
+
+      - name: Remote install — Composer, Artisan, permissions
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          REMOTE_DOMAIN: ${{ env.REMOTE_DOMAIN }}
+          REMOTE_APP_DIR: ${{ env.REMOTE_APP_DIR }}
+          RUN_MIGRATIONS: ${{ env.RUN_MIGRATIONS }}
+          RUN_SEEDERS: ${{ env.RUN_SEEDERS }}
+          GENX_DOTENV_B64: ${{ secrets.GENX_DOTENV_B64 }}
+          GENX_PHP_BIN: ${{ secrets.GENX_PHP_BIN }}
+        with:
+          host: ${{ secrets.GENX_SSH_HOST }}
+          port: ${{ secrets.GENX_SSH_PORT }}
+          username: ${{ secrets.GENX_SSH_USER }}
+          key: ${{ secrets.GENX_SSH_KEY }}
+          envs: REMOTE_DOMAIN,REMOTE_APP_DIR,RUN_MIGRATIONS,RUN_SEEDERS,GENX_DOTENV_B64,GENX_PHP_BIN
+          script_stop: true
+          script: |
+            set -euo pipefail
+            PHP_BIN="${GENX_PHP_BIN:-php}"
+            if [ -z "$PHP_BIN" ]; then PHP_BIN="php"; fi
+            if ! command -v "$PHP_BIN" >/dev/null 2>&1; then
+              echo "PHP binary not found: $PHP_BIN"
+              exit 1
+            fi
+            echo "Using PHP: $($PHP_BIN -v | head -1)"
+
+            APP_ROOT="/home/$REMOTE_DOMAIN/public_html/$REMOTE_APP_DIR"
+            PUBLIC_ROOT="/home/$REMOTE_DOMAIN/public_html"
+            cd "$APP_ROOT"
+
+            # Optional one-time / CI-managed .env (base64). Otherwise server must already have .env.
+            if [ -n "${GENX_DOTENV_B64:-}" ]; then
+              echo "$GENX_DOTENV_B64" | base64 -d > .env
+              chmod 600 .env
+            fi
+            if [ ! -f .env ]; then
+              echo "ERROR: $APP_ROOT/.env is missing. Add it in CyberPanel (File Manager) or set secret GENX_DOTENV_B64 once."
+              exit 1
+            fi
+
+            mkdir -p storage/framework/{cache,sessions,views}
+            mkdir -p storage/app/public
+            mkdir -p bootstrap/cache
+            mkdir -p public/user-uploads
+
+            WEB_GROUP="$(id -gn)"
+            if getent group www-data >/dev/null 2>&1; then WEB_GROUP="www-data"; fi
+            if getent group nobody >/dev/null 2>&1; then WEB_GROUP="nobody"; fi
+            if getent group nogroup >/dev/null 2>&1; then WEB_GROUP="nogroup"; fi
+            chown -R "$(whoami):$WEB_GROUP" storage bootstrap/cache public/user-uploads 2>/dev/null || true
+            find storage bootstrap/cache -type d -exec chmod 775 {} \; 2>/dev/null || true
+            find storage bootstrap/cache -type f -exec chmod 664 {} \; 2>/dev/null || true
+
+            REQUIRED="mbstring intl bcmath curl dom fileinfo gd json openssl pdo pdo_mysql tokenizer xml sodium"
+            MISSING=""
+            for ext in $REQUIRED; do
+              $PHP_BIN -m | grep -qi "^$ext$" || MISSING="$MISSING $ext"
+            done
+            if [ -n "$MISSING" ]; then
+              echo "Missing PHP extensions:$MISSING"
+              exit 1
+            fi
+
+            if ! command -v composer >/dev/null 2>&1; then
+              mkdir -p "$HOME/bin"
+              $PHP_BIN -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+              $PHP_BIN composer-setup.php --install-dir="$HOME/bin" --filename=composer
+              rm -f composer-setup.php
+              export PATH="$HOME/bin:$PATH"
+            fi
+
+            COMPOSER_BIN="$(command -v composer)"
+            export COMPOSER_ALLOW_SUPERUSER=1
+            $PHP_BIN "$COMPOSER_BIN" install --no-dev --prefer-dist --optimize-autoloader --no-interaction --no-progress
+
+            $PHP_BIN artisan optimize:clear || true
+
+            if [ "$RUN_MIGRATIONS" = "true" ]; then
+              $PHP_BIN artisan migrate --force --no-interaction
+            fi
+            if [ "$RUN_SEEDERS" = "true" ]; then
+              $PHP_BIN artisan db:seed --force --no-interaction
+            fi
+
+            $PHP_BIN artisan storage:link --force --no-interaction || true
+
+            $PHP_BIN artisan optimize --no-interaction || true
+
+            $PHP_BIN artisan queue:restart --no-interaction || true
+
+            cd "$PUBLIC_ROOT"
+            rm -rf user-uploads 2>/dev/null || true
+            ln -sfn "./$REMOTE_APP_DIR/public/user-uploads" user-uploads
+            ls -la user-uploads
+
+            echo "Deploy finished for https://${REMOTE_DOMAIN}/"
