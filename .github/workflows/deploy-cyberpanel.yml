@@ -267,9 +267,11 @@ jobs:
                 rm -f database/database.sqlite
               fi
               $PHP_BIN artisan migrate --force --no-interaction
-              $PHP_BIN artisan module:migrate --force --no-interaction || true
+              $PHP_BIN artisan module:migrate --force --no-interaction
             fi
             if [ "$RUN_SEEDERS" = "true" ]; then
+              # Inventory tables (e.g. purchase_locations) must exist before seeders create branches.
+              $PHP_BIN artisan module:migrate --force --no-interaction
               $PHP_BIN artisan db:seed --force --no-interaction
             fi
 
