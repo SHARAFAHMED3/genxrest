@@ -19,8 +19,6 @@ return new class extends Migration
             $table->string('countries_name');
             $table->string('phonecode');
 
-            // Indexes
-            $table->primary(['id']);
             $table->index(['countries_code']);
         });
 

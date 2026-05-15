@@ -247,8 +247,25 @@ jobs:
             $PHP_BIN "$COMPOSER_BIN" install --no-dev --prefer-dist --optimize-autoloader --no-interaction --no-progress
 
             $PHP_BIN artisan optimize:clear || true
+            $PHP_BIN artisan config:clear --no-interaction || true
 
             if [ "$RUN_MIGRATIONS" = "true" ]; then
+              DB_CONN="$(grep -E '^[[:space:]]*DB_CONNECTION=' .env | tail -1 | cut -d= -f2- | tr -d ' "' || true)"
+              if [ "$DB_CONN" != "mysql" ]; then
+                echo "ERROR: Production deploy requires DB_CONNECTION=mysql in $APP_ROOT/.env (found: ${DB_CONN:-<unset>})."
+                echo "Add MySQL credentials from CyberPanel → Databases:"
+                echo "  DB_CONNECTION=mysql"
+                echo "  DB_HOST=127.0.0.1"
+                echo "  DB_PORT=3306"
+                echo "  DB_DATABASE=..."
+                echo "  DB_USERNAME=..."
+                echo "  DB_PASSWORD=..."
+                exit 1
+              fi
+              if [ "$DB_CONN" = "mysql" ] && [ -f database/database.sqlite ]; then
+                echo "::warning::Removing stray database/database.sqlite from a previous sqlite migrate."
+                rm -f database/database.sqlite
+              fi
               $PHP_BIN artisan migrate --force --no-interaction
             fi
             if [ "$RUN_SEEDERS" = "true" ]; then
