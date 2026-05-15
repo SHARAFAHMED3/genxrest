@@ -72,7 +72,6 @@ jobs:
             echo "Host $H"
             echo "  HostName $H"
             echo "  Port $P"
-            echo "  IdentitiesOnly yes"
             echo "  StrictHostKeyChecking accept-new"
             echo "  UserKnownHostsFile $HOME/.ssh/known_hosts"
           } >> ~/.ssh/config
@@ -81,7 +80,9 @@ jobs:
       - name: SSH preflight
         run: |
           set -e
-          ssh -o IdentitiesOnly=yes \
+          # Do not use IdentitiesOnly=yes here: webfactory/ssh-agent loads keys only into the agent,
+          # and IdentitiesOnly without IdentityFile blocks agent-based auth.
+          ssh -o PreferredAuthentications=publickey \
             "${{ secrets.GENX_SSH_USER }}@${{ secrets.GENX_SSH_HOST }}" \
             "echo SSH OK: \$(whoami) on \$(hostname)"
 
@@ -157,7 +158,7 @@ jobs:
       - name: Rsync application to server
         run: |
           set -e
-          RSYNC_SSH="ssh -o IdentitiesOnly=yes"
+          RSYNC_SSH="ssh -o PreferredAuthentications=publickey"
           rsync -avz \
             -e "$RSYNC_SSH" \
             deploy_app/ "${{ secrets.GENX_SSH_USER }}@${{ secrets.GENX_SSH_HOST }}:/home/${{ env.REMOTE_DOMAIN }}/public_html/${{ env.REMOTE_APP_DIR }}/"
@@ -165,7 +166,7 @@ jobs:
       - name: Rsync public document root
         run: |
           set -e
-          RSYNC_SSH="ssh -o IdentitiesOnly=yes"
+          RSYNC_SSH="ssh -o PreferredAuthentications=publickey"
           rsync -avz \
             -e "$RSYNC_SSH" \
             deploy_public/ "${{ secrets.GENX_SSH_USER }}@${{ secrets.GENX_SSH_HOST }}:/home/${{ env.REMOTE_DOMAIN }}/public_html/"
