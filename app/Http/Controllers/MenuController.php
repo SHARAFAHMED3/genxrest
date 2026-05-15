@@ -1,0 +1,34 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+
+class MenuController extends Controller
+{
+
+    public function index()
+    {
+        abort_if(!in_array('Menu', restaurant_modules()), 403);
+        abort_if((!user_can('Show Menu')), 403);
+
+        return view('menu.index');
+    }
+
+    public function unifiedSort()
+    {
+        abort_if(!in_array('Menu', restaurant_modules()), 403);
+        abort_if((!user_can('Show Menu')), 403);
+
+        return view('menu.unified_sort');
+    }
+
+    public function comboPacks()
+    {
+        abort_if(!in_array('Menu Item', restaurant_modules()), 403);
+        abort_if((!user_can('Show Menu Item')), 403);
+
+        return view('menu.combo_packs');
+    }
+
+}

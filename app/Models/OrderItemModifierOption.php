@@ -1,0 +1,25 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class OrderItemModifierOption extends BaseModel
+{
+    protected $guarded = ['id'];
+
+    protected $casts = [
+        'quantity' => 'int',
+    ];
+
+    public function orderItem(): BelongsTo
+    {
+        return $this->belongsTo(OrderItem::class, 'order_item_id');
+    }
+
+    public function modifierOption(): BelongsTo
+    {
+        return $this->belongsTo(ModifierOption::class, 'modifier_option_id');
+    }
+}
