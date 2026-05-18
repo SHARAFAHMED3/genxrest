@@ -6,6 +6,8 @@ use App\Models\Restaurant;
 use App\Models\RestaurantPayment;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\App;
+use Illuminate\Support\Facades\Artisan;
+use Nwidart\Modules\Facades\Module;
 
 class DatabaseSeeder extends Seeder
 {
@@ -25,6 +27,11 @@ class DatabaseSeeder extends Seeder
 
         $this->call(PermissionSeeder::class);
         $this->call(LanguageSettingSeeder::class);
+
+        // BranchObserver syncs branches to purchase_locations (Inventory). Main migrate does
+        // not run module migrations, so seeding must create Inventory tables before any Branch.
+        $this->ensureInventoryModuleMigratedForSeeding();
+
         $this->call(RestaurantSettingSeeder::class);
         $this->call(FrontDetailSeeder::class);
         $this->call(EmailSettingSeeder::class);
@@ -65,5 +72,26 @@ class DatabaseSeeder extends Seeder
                 ]);
             }
         }
+    }
+
+    /**
+     * Enable and migrate Inventory so purchase_locations exists before RestaurantSettingSeeder
+     * creates branches (BranchObserver::updated runs during generateQrCode() saves).
+     */
+    protected function ensureInventoryModuleMigratedForSeeding(): void
+    {
+        if (!class_exists(Module::class) || !Module::has('Inventory')) {
+            return;
+        }
+
+        Artisan::call('module:enable', [
+            'module' => 'Inventory',
+            '--no-interaction' => true,
+        ]);
+        Artisan::call('module:migrate', [
+            'module' => 'Inventory',
+            '--force' => true,
+            '--no-interaction' => true,
+        ]);
     }
 }

@@ -6,6 +6,7 @@ use App\Models\Branch;
 use App\Models\MenuItem;
 use App\Models\OrderType;
 use App\Models\OnboardingStep;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -208,9 +209,13 @@ class BranchObserver
             return;
         }
 
-        \Modules\Inventory\Entities\PurchaseLocation::where('branch_id', $branch->id)
-            ->where('type', 'branch')
-            ->update(['is_active' => false]);
+        try {
+            \Modules\Inventory\Entities\PurchaseLocation::where('branch_id', $branch->id)
+                ->where('type', 'branch')
+                ->update(['is_active' => false]);
+        } catch (QueryException $e) {
+            $this->ignoreMissingPurchaseLocationsTable($e);
+        }
     }
 
     private function purchaseLocationsTableExists(): bool
@@ -224,29 +229,45 @@ class BranchObserver
             return;
         }
 
-        $exists = \Modules\Inventory\Entities\PurchaseLocation::where('branch_id', $branch->id)
-            ->where('type', 'branch')
-            ->exists();
-
-        if ($exists) {
-            \Modules\Inventory\Entities\PurchaseLocation::where('branch_id', $branch->id)
+        try {
+            $exists = \Modules\Inventory\Entities\PurchaseLocation::where('branch_id', $branch->id)
                 ->where('type', 'branch')
-                ->update([
-                    'name' => $branch->name,
-                    'address' => $branch->address,
-                    'is_active' => $branch->is_active ?? true,
-                ]);
+                ->exists();
 
+            if ($exists) {
+                \Modules\Inventory\Entities\PurchaseLocation::where('branch_id', $branch->id)
+                    ->where('type', 'branch')
+                    ->update([
+                        'name' => $branch->name,
+                        'address' => $branch->address,
+                        'is_active' => $branch->is_active ?? true,
+                    ]);
+
+                return;
+            }
+
+            \Modules\Inventory\Entities\PurchaseLocation::create([
+                'restaurant_id' => $branch->restaurant_id,
+                'branch_id' => $branch->id,
+                'name' => $branch->name,
+                'address' => $branch->address,
+                'type' => 'branch',
+                'is_active' => $branch->is_active ?? true,
+            ]);
+        } catch (QueryException $e) {
+            $this->ignoreMissingPurchaseLocationsTable($e);
+        }
+    }
+
+    private function ignoreMissingPurchaseLocationsTable(QueryException $e): void
+    {
+        $message = $e->getMessage();
+        if (str_contains($message, 'Base table or view not found')
+            || str_contains($message, "doesn't exist")
+            || $e->getCode() === '42S02') {
             return;
         }
 
-        \Modules\Inventory\Entities\PurchaseLocation::create([
-            'restaurant_id' => $branch->restaurant_id,
-            'branch_id' => $branch->id,
-            'name' => $branch->name,
-            'address' => $branch->address,
-            'type' => 'branch',
-            'is_active' => $branch->is_active ?? true,
-        ]);
+        throw $e;
     }
 }
