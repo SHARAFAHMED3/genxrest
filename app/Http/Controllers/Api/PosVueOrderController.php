@@ -697,7 +697,7 @@ class PosVueOrderController extends Controller
                 $taxBreakupVal = null;
                 if ($taxModeStore === 'item' && $menuItem->taxes->isNotEmpty()) {
                     $isInclusive = (bool) (restaurant()->tax_inclusive ?? false);
-                    $taxResult = MenuItem::calculateItemTaxes($unitPrice, $menuItem->taxes, $isInclusive);
+                    $taxResult = MenuItem::calculateItemTaxes($unitPrice, $isInclusive, $menuItem->taxes);
                     $lineTaxTotal = round((float) ($taxResult['tax_amount'] ?? 0) * $qty, 2);
                     $taxAmountVal = $lineTaxTotal;
                     $taxPercentageVal = $taxResult['tax_percentage'] ?? null;

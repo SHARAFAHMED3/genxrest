@@ -411,7 +411,7 @@ class CartSessionService
         $branch = Branch::with('restaurant')->find($menuItem->branch_id);
         $isInclusive = $branch->restaurant->tax_inclusive ?? false;
 
-        $taxResult = MenuItem::calculateItemTaxes($itemPrice, $taxes, $isInclusive);
+        $taxResult = MenuItem::calculateItemTaxes($itemPrice, $isInclusive, $taxes);
 
         return [
             'tax_amount' => $taxResult['tax_amount'] * $quantity,

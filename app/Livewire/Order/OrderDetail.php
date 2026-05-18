@@ -653,7 +653,7 @@ class OrderDetail extends Component
                         $isInclusive = restaurant()->tax_inclusive ?? false;
 
                         if ($taxes->isNotEmpty()) {
-                            $taxResult = MenuItem::calculateItemTaxes($price, $taxes, $isInclusive);
+                            $taxResult = MenuItem::calculateItemTaxes($price, $isInclusive, $taxes);
                             $taxAmount = $taxResult['tax_amount'] * $item->quantity;
                             $taxPercentage = $taxResult['tax_percentage'];
                             $taxBreakup = json_encode($taxResult['tax_breakdown']);

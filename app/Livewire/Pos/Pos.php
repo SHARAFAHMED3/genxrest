@@ -5020,7 +5020,7 @@ class Pos extends Component
             $itemPriceWithModifiers = $basePrice + $modifierPrice;
             $taxes = $menuItem->taxes ?? collect();
             $isInclusive = restaurant()->tax_inclusive;
-            $taxResult = MenuItem::calculateItemTaxes($itemPriceWithModifiers, $taxes, $isInclusive);
+            $taxResult = MenuItem::calculateItemTaxes($itemPriceWithModifiers, $isInclusive, $taxes);
             $this->orderItemTaxDetails[$key] = [
                 'tax_amount' => $taxResult['tax_amount'] * $qty,
                 'tax_percent' => $taxResult['tax_percentage'],

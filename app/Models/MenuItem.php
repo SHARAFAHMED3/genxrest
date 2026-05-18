@@ -289,7 +289,7 @@ class MenuItem extends BaseModel
         ];
     }
 
-    public static function calculateItemTaxes($itemPrice, $taxes = [], $inclusive)
+    public static function calculateItemTaxes($itemPrice, $inclusive, $taxes = [])
     {
         // Ensure $taxes is a collection
         if (is_array($taxes)) {

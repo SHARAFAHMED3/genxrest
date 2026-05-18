@@ -108,12 +108,14 @@ if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
   if ! "$PHP_BIN" artisan module:enable Inventory --no-interaction; then
     echo "::warning::module:enable Inventory returned non-zero (often OK if already enabled)."
   fi
-  "$PHP_BIN" artisan module:migrate --force --no-interaction
+  # nwidart v12+: bare module:migrate opens an interactive module picker; with
+  # --no-interaction that yields no modules and runs zero migrations. Pass the module or --all.
+  "$PHP_BIN" artisan module:migrate Inventory --force --no-interaction
   "$PHP_BIN" artisan tinker --execute="foreach (['global_settings','pusher_settings','migrations','inventory_item_categories','purchase_locations'] as \$t) { if (!Schema::hasTable(\$t)) { echo 'Missing table: '.\$t.PHP_EOL; exit(1); } } echo 'Database schema OK'.PHP_EOL;"
 fi
 
 if [ "${RUN_SEEDERS:-false}" = "true" ]; then
-  "$PHP_BIN" artisan module:migrate --force --no-interaction
+  "$PHP_BIN" artisan module:migrate Inventory --force --no-interaction
   "$PHP_BIN" artisan db:seed --force --no-interaction
 fi
 
