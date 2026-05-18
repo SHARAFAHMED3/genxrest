@@ -8,13 +8,10 @@
 # Optional secrets:
 #   GENX_REMOTE_DOMAIN      (default: digierp.cloud)
 #   GENX_REMOTE_APP_DIR     (default: laravel — app lives in public_html/laravel)
-#   GENX_RUN_MIGRATIONS       (default: true)
+#   GENX_RUN_MIGRATIONS     (default: true)
 #   GENX_RUN_SEEDERS        (default: false)
 #   GENX_PHP_BIN            (optional) e.g. /usr/local/lsws/lsphp83/bin/php — auto-detected if unset
-#   GENX_DOTENV_B64         (optional) base64-encoded full .env for first-time bootstrap only
-#
-# Server: create MySQL DB in CyberPanel, then place .env on the server (recommended), or set
-# GENX_DOTENV_B64 once for initial deploy — never commit real credentials to git.
+#   GENX_DOTENV_B64         (optional) base64-encoded full .env — written on every deploy if set
 
 name: Deploy to CyberPanel (digierp.cloud)
 
@@ -32,25 +29,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      REMOTE_DOMAIN: ${{ secrets.GENX_REMOTE_DOMAIN || 'digierp.cloud' }}
-      REMOTE_APP_DIR: ${{ secrets.GENX_REMOTE_APP_DIR || 'laravel' }}
-      RUN_MIGRATIONS: ${{ secrets.GENX_RUN_MIGRATIONS || 'true' }}
-      RUN_SEEDERS: ${{ secrets.GENX_RUN_SEEDERS || 'false' }}
+      REMOTE_DOMAIN:   ${{ secrets.GENX_REMOTE_DOMAIN || 'digierp.cloud' }}
+      REMOTE_APP_DIR:  ${{ secrets.GENX_REMOTE_APP_DIR || 'laravel' }}
+      RUN_MIGRATIONS:  ${{ secrets.GENX_RUN_MIGRATIONS || 'true' }}
+      RUN_SEEDERS:     ${{ secrets.GENX_RUN_SEEDERS || 'false' }}
       DEPLOY_SSH_PORT: ${{ secrets.GENX_SSH_PORT || '22' }}
-      # CyberPanel LiteSpeed PHP (has mbstring, pdo_mysql, etc.) — override with secret GENX_PHP_BIN
-      GENX_PHP_BIN: ${{ secrets.GENX_PHP_BIN || '/usr/local/lsws/lsphp83/bin/php' }}
+      GENX_PHP_BIN:    ${{ secrets.GENX_PHP_BIN || '/usr/local/lsws/lsphp83/bin/php' }}
 
     steps:
+      # ------------------------------------------------------------------ #
+      #  1. Checkout
+      # ------------------------------------------------------------------ #
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ------------------------------------------------------------------ #
+      #  2. SSH agent + known_hosts
+      # ------------------------------------------------------------------ #
       - name: Setup SSH agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.GENX_SSH_KEY }}
 
-      # ssh-keyscan often fails from GitHub runners (timeout, KEX mismatch, fail2ban). Do not fail the job.
-      # accept-new stores the host key on first successful SSH instead of requiring a pre-filled known_hosts.
       - name: SSH known_hosts + client config
         shell: bash
         run: |
@@ -68,7 +68,7 @@ jobs:
           if [ "$KS" -ne 0 ]; then
             echo "::warning::ssh-keyscan exited $KS. Logs:"
             sed 's/^/  /' /tmp/ssh-keyscan.log >&2 || true
-            echo "::warning::Continuing with StrictHostKeyChecking=accept-new (host key saved on first SSH)."
+            echo "::warning::Continuing with StrictHostKeyChecking=accept-new."
           fi
           {
             echo "Host $H"
@@ -79,15 +79,19 @@ jobs:
           } >> ~/.ssh/config
           chmod 600 ~/.ssh/config
 
+      # ------------------------------------------------------------------ #
+      #  3. SSH preflight
+      # ------------------------------------------------------------------ #
       - name: SSH preflight
         run: |
           set -e
-          # Do not use IdentitiesOnly=yes here: webfactory/ssh-agent loads keys only into the agent,
-          # and IdentitiesOnly without IdentityFile blocks agent-based auth.
           ssh -o PreferredAuthentications=publickey \
             "${{ secrets.GENX_SSH_USER }}@${{ secrets.GENX_SSH_HOST }}" \
             "echo SSH OK: \$(whoami) on \$(hostname)"
 
+      # ------------------------------------------------------------------ #
+      #  4. Node / Vite build
+      # ------------------------------------------------------------------ #
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -100,6 +104,9 @@ jobs:
           npm ci
           npm run build
 
+      # ------------------------------------------------------------------ #
+      #  5. Prepare deploy artifacts
+      # ------------------------------------------------------------------ #
       - name: Prepare deploy artifacts (Laravel app + public docroot)
         shell: bash
         run: |
@@ -115,7 +122,7 @@ jobs:
           done
           if [ -d lang ]; then cp -a lang deploy_app/; fi
           mkdir -p deploy_app/resources
-          [ -d resources/lang ] && cp -a resources/lang deploy_app/resources/
+          [ -d resources/lang ]  && cp -a resources/lang  deploy_app/resources/
           [ -d resources/views ] && cp -a resources/views deploy_app/resources/
 
           mkdir -p deploy_app/storage/app/public
@@ -161,13 +168,17 @@ jobs:
           $kernel->terminate($request, $response);
           PHP
 
+      # ------------------------------------------------------------------ #
+      #  6. Rsync to server
+      # ------------------------------------------------------------------ #
       - name: Rsync application to server
         run: |
           set -e
           RSYNC_SSH="ssh -o PreferredAuthentications=publickey"
           rsync -avz \
             -e "$RSYNC_SSH" \
-            deploy_app/ "${{ secrets.GENX_SSH_USER }}@${{ secrets.GENX_SSH_HOST }}:/home/${{ env.REMOTE_DOMAIN }}/public_html/${{ env.REMOTE_APP_DIR }}/"
+            deploy_app/ \
+            "${{ secrets.GENX_SSH_USER }}@${{ secrets.GENX_SSH_HOST }}:/home/${{ env.REMOTE_DOMAIN }}/public_html/${{ env.REMOTE_APP_DIR }}/"
 
       - name: Rsync public document root
         run: |
@@ -175,26 +186,100 @@ jobs:
           RSYNC_SSH="ssh -o PreferredAuthentications=publickey"
           rsync -avz \
             -e "$RSYNC_SSH" \
-            deploy_public/ "${{ secrets.GENX_SSH_USER }}@${{ secrets.GENX_SSH_HOST }}:/home/${{ env.REMOTE_DOMAIN }}/public_html/"
+            deploy_public/ \
+            "${{ secrets.GENX_SSH_USER }}@${{ secrets.GENX_SSH_HOST }}:/home/${{ env.REMOTE_DOMAIN }}/public_html/"
 
-      - name: Remote install — Composer, Artisan, permissions
+      # ------------------------------------------------------------------ #
+      #  7. DB pre-check — fail fast with a clear message before migrations
+      # ------------------------------------------------------------------ #
+      - name: DB connection pre-check
         uses: appleboy/ssh-action@v1.0.3
         env:
-          REMOTE_DOMAIN: ${{ env.REMOTE_DOMAIN }}
+          REMOTE_DOMAIN:  ${{ env.REMOTE_DOMAIN }}
           REMOTE_APP_DIR: ${{ env.REMOTE_APP_DIR }}
-          RUN_MIGRATIONS: ${{ env.RUN_MIGRATIONS }}
-          RUN_SEEDERS: ${{ env.RUN_SEEDERS }}
-          GENX_DOTENV_B64: ${{ secrets.GENX_DOTENV_B64 }}
-          GENX_PHP_BIN: ${{ env.GENX_PHP_BIN }}
+          GENX_PHP_BIN:   ${{ env.GENX_PHP_BIN }}
         with:
-          host: ${{ secrets.GENX_SSH_HOST }}
-          port: ${{ env.DEPLOY_SSH_PORT }}
-          username: ${{ secrets.GENX_SSH_USER }}
-          key: ${{ secrets.GENX_SSH_KEY }}
-          envs: REMOTE_DOMAIN,REMOTE_APP_DIR,RUN_MIGRATIONS,RUN_SEEDERS,GENX_DOTENV_B64,GENX_PHP_BIN
+          host:        ${{ secrets.GENX_SSH_HOST }}
+          port:        ${{ env.DEPLOY_SSH_PORT }}
+          username:    ${{ secrets.GENX_SSH_USER }}
+          key:         ${{ secrets.GENX_SSH_KEY }}
+          envs:        REMOTE_DOMAIN,REMOTE_APP_DIR,GENX_PHP_BIN
           script_stop: true
           script: |
             set -euo pipefail
-            APP_ROOT="/home/${{ env.REMOTE_DOMAIN }}/public_html/${{ env.REMOTE_APP_DIR }}"
-            echo "=== Remote install v5 (external script, avoids appleboy bash mangling) ==="
+            PHP_BIN="${GENX_PHP_BIN:-/usr/local/lsws/lsphp83/bin/php}"
+            ENV_FILE="/home/${REMOTE_DOMAIN}/public_html/${REMOTE_APP_DIR}/.env"
+
+            echo "=== DB pre-check ==="
+
+            if [ ! -f "$ENV_FILE" ]; then
+              echo "::error::.env not found at $ENV_FILE"
+              echo "  → Place a .env on the server, or set the GENX_DOTENV_B64 secret."
+              exit 1
+            fi
+
+            # Parse .env for DB vars (strips quotes, ignores comments)
+            _env() { grep -E "^${1}=" "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"'"'" | xargs; }
+
+            DB_HOST=$(_env DB_HOST)
+            DB_PORT=${$(_env DB_PORT):-3306}
+            DB_DATABASE=$(_env DB_DATABASE)
+            DB_USERNAME=$(_env DB_USERNAME)
+            DB_PASSWORD=$(_env DB_PASSWORD)
+
+            echo "  DB_HOST=$DB_HOST  DB_PORT=$DB_PORT  DB_DATABASE=$DB_DATABASE  DB_USERNAME=$DB_USERNAME"
+
+            # Try connecting — use PHP PDO so we test the exact same driver Laravel uses
+            "$PHP_BIN" -r "
+              \$hosts = array_unique(['$DB_HOST', '127.0.0.1', 'localhost']);
+              \$connected = false;
+              foreach (\$hosts as \$h) {
+                try {
+                  \$pdo = new PDO(
+                    'mysql:host='.\$h.';port=$DB_PORT;dbname=$DB_DATABASE',
+                    '$DB_USERNAME',
+                    '$DB_PASSWORD',
+                    [PDO::ATTR_TIMEOUT => 5]
+                  );
+                  echo 'DB OK via host: '.\$h.PHP_EOL;
+                  \$connected = true;
+                  break;
+                } catch (PDOException \$e) {
+                  echo 'FAILED ('.\$h.'): '.\$e->getMessage().PHP_EOL;
+                }
+              }
+              if (!\$connected) {
+                echo PHP_EOL;
+                echo 'ERROR: Could not connect to MySQL with any host variant.'.PHP_EOL;
+                echo 'Fix options:'.PHP_EOL;
+                echo '  1. Verify DB_USERNAME/DB_PASSWORD in '.'$ENV_FILE'.PHP_EOL;
+                echo '  2. In CyberPanel: confirm the DB user has GRANT on $DB_DATABASE'.PHP_EOL;
+                echo '  3. Try DB_HOST=127.0.0.1 instead of localhost in .env'.PHP_EOL;
+                exit(1);
+              }
+            "
+
+      # ------------------------------------------------------------------ #
+      #  8. Remote install — Composer, Artisan, permissions
+      # ------------------------------------------------------------------ #
+      - name: Remote install — Composer, Artisan, permissions
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          REMOTE_DOMAIN:   ${{ env.REMOTE_DOMAIN }}
+          REMOTE_APP_DIR:  ${{ env.REMOTE_APP_DIR }}
+          RUN_MIGRATIONS:  ${{ env.RUN_MIGRATIONS }}
+          RUN_SEEDERS:     ${{ env.RUN_SEEDERS }}
+          GENX_DOTENV_B64: ${{ secrets.GENX_DOTENV_B64 }}
+          GENX_PHP_BIN:    ${{ env.GENX_PHP_BIN }}
+        with:
+          host:        ${{ secrets.GENX_SSH_HOST }}
+          port:        ${{ env.DEPLOY_SSH_PORT }}
+          username:    ${{ secrets.GENX_SSH_USER }}
+          key:         ${{ secrets.GENX_SSH_KEY }}
+          envs:        REMOTE_DOMAIN,REMOTE_APP_DIR,RUN_MIGRATIONS,RUN_SEEDERS,GENX_DOTENV_B64,GENX_PHP_BIN
+          script_stop: true
+          script: |
+            set -euo pipefail
+            APP_ROOT="/home/${REMOTE_DOMAIN}/public_html/${REMOTE_APP_DIR}"
+            echo "=== Remote install v6 ==="
             exec bash "$APP_ROOT/scripts/cyberpanel-remote-install.sh"
