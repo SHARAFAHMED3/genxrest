@@ -318,9 +318,12 @@ if (!function_exists('global_setting')) {
     // @codingStandardsIgnoreLine
     function global_setting()
     {
-
         if (cache()->has('global_setting')) {
             return cache('global_setting');
+        }
+
+        if (!\Illuminate\Support\Facades\Schema::hasTable('global_settings')) {
+            return null;
         }
 
         cache(['global_setting' => GlobalSetting::first()]);

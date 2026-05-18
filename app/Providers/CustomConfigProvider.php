@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -25,21 +26,23 @@ class CustomConfigProvider extends ServiceProvider
     public function register()
     {
         try {
-            // Fetch all settings in a single query
-            $setting = DB::table('email_settings')->first();
+            if (Schema::hasTable('email_settings')) {
+                $setting = DB::table('email_settings')->first();
 
-            if ($setting) {
-                $this->setMailConfig($setting);
+                if ($setting) {
+                    $this->setMailConfig($setting);
+                }
             }
 
-            $pushNotificationSetting = DB::table('pusher_settings')->first();
+            if (Schema::hasTable('pusher_settings')) {
+                $pushNotificationSetting = DB::table('pusher_settings')->first();
 
-            if ($pushNotificationSetting) {
-                $this->setPushNotificationConfig($pushNotificationSetting);
+                if ($pushNotificationSetting) {
+                    $this->setPushNotificationConfig($pushNotificationSetting);
+                }
             }
         } catch (\Exception $e) {
             info($e->getMessage());
-            // Handle exceptions appropriately, e.g., log the error
         }
 
         $app = App::getInstance();
@@ -50,7 +53,15 @@ class CustomConfigProvider extends ServiceProvider
 
     public function setMailConfig($setting)
     {
+        if (!Schema::hasTable('global_settings')) {
+            return;
+        }
+
         $globalSetting = DB::table('global_settings')->first();
+
+        if (!$globalSetting) {
+            return;
+        }
 
         if (!in_array(app()->environment(), self::ALL_ENVIRONMENT)) {
             $driver = ($setting->mail_driver != 'mail') ? $setting->mail_driver : 'sendmail';
@@ -111,6 +122,10 @@ class CustomConfigProvider extends ServiceProvider
     {
         // Ensure broadcasting config is set during boot
         try {
+            if (!Schema::hasTable('pusher_settings')) {
+                return;
+            }
+
             $pushNotificationSetting = DB::table('pusher_settings')->first();
             if ($pushNotificationSetting) {
                 $this->setPushNotificationConfig($pushNotificationSetting);

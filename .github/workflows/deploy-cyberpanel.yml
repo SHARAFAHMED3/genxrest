@@ -268,6 +268,7 @@ jobs:
               fi
               $PHP_BIN artisan migrate --force --no-interaction
               $PHP_BIN artisan module:migrate --force --no-interaction
+              $PHP_BIN artisan tinker --execute="foreach (['global_settings','pusher_settings','migrations','inventory_item_categories','purchase_locations'] as \$t) { if (!Schema::hasTable(\$t)) { echo 'Missing table: '.\$t.PHP_EOL; exit(1); } } echo 'Database schema OK'.PHP_EOL;"
             fi
             if [ "$RUN_SEEDERS" = "true" ]; then
               # Inventory tables (e.g. purchase_locations) must exist before seeders create branches.
