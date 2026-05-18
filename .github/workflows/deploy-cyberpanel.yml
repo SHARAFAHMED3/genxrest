@@ -10,7 +10,7 @@
 #   GENX_REMOTE_APP_DIR     (default: laravel — app lives in public_html/laravel)
 #   GENX_RUN_MIGRATIONS       (default: true)
 #   GENX_RUN_SEEDERS        (default: false)
-#   GENX_PHP_BIN            (optional) e.g. /usr/local/lsws/lsphp82/bin/php — defaults to php on PATH
+#   GENX_PHP_BIN            (optional) e.g. /usr/local/lsws/lsphp83/bin/php — auto-detected if unset
 #   GENX_DOTENV_B64         (optional) base64-encoded full .env for first-time bootstrap only
 #
 # Server: create MySQL DB in CyberPanel, then place .env on the server (recommended), or set
@@ -37,6 +37,8 @@ jobs:
       RUN_MIGRATIONS: ${{ secrets.GENX_RUN_MIGRATIONS || 'true' }}
       RUN_SEEDERS: ${{ secrets.GENX_RUN_SEEDERS || 'false' }}
       DEPLOY_SSH_PORT: ${{ secrets.GENX_SSH_PORT || '22' }}
+      # CyberPanel LiteSpeed PHP (has mbstring, pdo_mysql, etc.) — override with secret GENX_PHP_BIN
+      GENX_PHP_BIN: ${{ secrets.GENX_PHP_BIN || '/usr/local/lsws/lsphp83/bin/php' }}
 
     steps:
       - name: Checkout
@@ -179,7 +181,7 @@ jobs:
           RUN_MIGRATIONS: ${{ env.RUN_MIGRATIONS }}
           RUN_SEEDERS: ${{ env.RUN_SEEDERS }}
           GENX_DOTENV_B64: ${{ secrets.GENX_DOTENV_B64 }}
-          GENX_PHP_BIN: ${{ secrets.GENX_PHP_BIN }}
+          GENX_PHP_BIN: ${{ env.GENX_PHP_BIN }}
         with:
           host: ${{ secrets.GENX_SSH_HOST }}
           port: ${{ env.DEPLOY_SSH_PORT }}
@@ -189,13 +191,32 @@ jobs:
           script_stop: true
           script: |
             set -euo pipefail
-            PHP_BIN="${GENX_PHP_BIN:-php}"
-            if [ -z "$PHP_BIN" ]; then PHP_BIN="php"; fi
-            if ! command -v "$PHP_BIN" >/dev/null 2>&1; then
-              echo "PHP binary not found: $PHP_BIN"
+            echo "=== Deploy remote script v3 (CyberPanel PHP auto-detect) ==="
+            PHP_BIN=""
+            for candidate in \
+              "${GENX_PHP_BIN}" \
+              /usr/local/lsws/lsphp83/bin/php \
+              /usr/local/lsws/lsphp82/bin/php \
+              /usr/local/lsws/lsphp84/bin/php \
+              /opt/alt/php83/usr/bin/php \
+              /opt/alt/php82/usr/bin/php \
+              "$(command -v php 2>/dev/null || true)" \
+              php
+            do
+              [ -z "$candidate" ] && continue
+              [ ! -x "$candidate" ] && continue
+              if "$candidate" -r 'foreach (["mbstring","intl","bcmath","curl","dom","fileinfo","gd","json","openssl","pdo","pdo_mysql","tokenizer","xml","sodium"] as $e) { if (!extension_loaded($e)) { echo $e.PHP_EOL; exit(1); } }' 2>/dev/null; then
+                PHP_BIN="$candidate"
+                break
+              fi
+              echo "Skip PHP $candidate — missing: $("$candidate" -r 'foreach (["mbstring","intl","bcmath","curl","dom","fileinfo","gd","json","openssl","pdo","pdo_mysql","tokenizer","xml","sodium"] as $e) { if (!extension_loaded($e)) echo $e." "; }' 2>/dev/null || echo 'unknown')"
+            done
+            if [ -z "$PHP_BIN" ]; then
+              echo "ERROR: No PHP with Laravel extensions. Set secret GENX_PHP_BIN (e.g. /usr/local/lsws/lsphp83/bin/php)."
+              ls -la /usr/local/lsws/lsphp*/bin/php 2>/dev/null || true
               exit 1
             fi
-            echo "Using PHP: $($PHP_BIN -v | head -1)"
+            echo "Using PHP: $PHP_BIN — $($PHP_BIN -v | head -1)"
 
             APP_ROOT="/home/$REMOTE_DOMAIN/public_html/$REMOTE_APP_DIR"
             PUBLIC_ROOT="/home/$REMOTE_DOMAIN/public_html"
@@ -223,16 +244,6 @@ jobs:
             chown -R "$(whoami):$WEB_GROUP" storage bootstrap/cache public/user-uploads 2>/dev/null || true
             find storage bootstrap/cache -type d -exec chmod 775 {} \; 2>/dev/null || true
             find storage bootstrap/cache -type f -exec chmod 664 {} \; 2>/dev/null || true
-
-            REQUIRED="mbstring intl bcmath curl dom fileinfo gd json openssl pdo pdo_mysql tokenizer xml sodium"
-            MISSING=""
-            for ext in $REQUIRED; do
-              $PHP_BIN -m | grep -qi "^$ext$" || MISSING="$MISSING $ext"
-            done
-            if [ -n "$MISSING" ]; then
-              echo "Missing PHP extensions:$MISSING"
-              exit 1
-            fi
 
             if ! command -v composer >/dev/null 2>&1; then
               mkdir -p "$HOME/bin"
