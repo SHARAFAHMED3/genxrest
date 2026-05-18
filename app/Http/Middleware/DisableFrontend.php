@@ -23,7 +23,7 @@ class DisableFrontend
         try {
             $global = global_setting();
 
-            if ($global->disable_landing_site && !request()->ajax()) {
+            if ($global && $global->disable_landing_site && !request()->ajax()) {
                 return redirect(route('login'));
             }
         } catch (\Exception $e) {

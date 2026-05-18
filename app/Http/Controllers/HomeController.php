@@ -27,7 +27,7 @@ class HomeController extends Controller
     {
         parent::__construct();
 
-        $locale = session('customer_locale') ?? (global_setting()->locale ?? 'en');
+        $locale = session('customer_locale') ?? (global_setting()?->locale ?? 'en');
         $languageSetting = LanguageSetting::where('language_code', $locale)->first();
 
         if (!$languageSetting) {
@@ -36,7 +36,7 @@ class HomeController extends Controller
         }
 
         if (!session()->has('customer_is_rtl')) {
-            session(['customer_is_rtl' => $languageSetting->is_rtl == 1]);
+            session(['customer_is_rtl' => $languageSetting && (int) $languageSetting->is_rtl === 1]);
         }
 
         app()->setLocale($locale);
@@ -62,6 +62,10 @@ class HomeController extends Controller
         $this->showInstall();
 
         $global = global_setting();
+
+        if (!$global) {
+            return redirect()->route('login');
+        }
 
         if ($global->disable_landing_site && !request()->ajax()) {
             return redirect(route('login'));
@@ -111,7 +115,7 @@ class HomeController extends Controller
 
     public function signup()
     {
-        if (global_setting()->disable_landing_site) {
+        if (global_setting()?->disable_landing_site) {
             return view('auth.restaurant_register');
         }
 
@@ -144,14 +148,14 @@ class HomeController extends Controller
         $secondimagePath = public_path('user-uploads/favicons/' . $slug . 'android-chrome-512x512.png');
         $firsticonUrl = File::exists($firstimagePath) ? asset('user-uploads/favicons/' . $slug . 'android-chrome-192x192.png') : $superadminUrl1;
         $secondiconUrl = File::exists($secondimagePath) ? asset('user-uploads/favicons/' . $slug . 'android-chrome-512x512.png') : $superadminUrl2;
-        $globalSetting = global_setting();
-
         $restaurant = Restaurant::where('hash', $hash)->first();
+        $globalSetting = global_setting();
+        $appName = $restaurant?->name ?? $globalSetting?->name ?? config('app.name');
 
         return response()->json([
-            'name' => $restaurant ? $restaurant->name : $globalSetting->name,
-            'short_name' => $restaurant ? $restaurant->name : $globalSetting->name,
-            'description' => $restaurant ? $restaurant->name : $globalSetting->name,
+            'name' => $restaurant ? $restaurant->name : $appName,
+            'short_name' => $restaurant ? $restaurant->name : $appName,
+            'description' => $restaurant ? $restaurant->name : $appName,
             'start_url' => url($relativeUrl),
             'display' => 'standalone',
             'background_color' => '#ffffff',
