@@ -222,7 +222,8 @@ jobs:
             _env() { grep -E "^${1}=" "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"'"'" | xargs; }
 
             DB_HOST=$(_env DB_HOST)
-            DB_PORT=${$(_env DB_PORT):-3306}
+            DB_PORT=$(_env DB_PORT)
+            DB_PORT="${DB_PORT:-3306}"
             DB_DATABASE=$(_env DB_DATABASE)
             DB_USERNAME=$(_env DB_USERNAME)
             DB_PASSWORD=$(_env DB_PASSWORD)
