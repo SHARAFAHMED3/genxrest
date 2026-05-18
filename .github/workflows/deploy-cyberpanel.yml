@@ -191,7 +191,8 @@ jobs:
           script_stop: true
           script: |
             set -euo pipefail
-            echo "=== Deploy remote script v3 (CyberPanel PHP auto-detect) ==="
+            echo "=== Deploy remote script v4 (CyberPanel PHP auto-detect) ==="
+            PHP_EXT_SNIPPET='foreach (["mbstring","intl","bcmath","curl","dom","fileinfo","gd","json","openssl","pdo","pdo_mysql","tokenizer","xml","sodium"] as $e) { if (!extension_loaded($e)) { exit(1); } }'
             PHP_BIN=""
             for candidate in \
               "${GENX_PHP_BIN}" \
@@ -205,18 +206,19 @@ jobs:
             do
               [ -z "$candidate" ] && continue
               [ ! -x "$candidate" ] && continue
-              if "$candidate" -r 'foreach (["mbstring","intl","bcmath","curl","dom","fileinfo","gd","json","openssl","pdo","pdo_mysql","tokenizer","xml","sodium"] as $e) { if (!extension_loaded($e)) { echo $e.PHP_EOL; exit(1); } }' 2>/dev/null; then
+              if "$candidate" -r "$PHP_EXT_SNIPPET" 2>/dev/null; then
                 PHP_BIN="$candidate"
                 break
               fi
-              echo "Skip PHP $candidate — missing: $("$candidate" -r 'foreach (["mbstring","intl","bcmath","curl","dom","fileinfo","gd","json","openssl","pdo","pdo_mysql","tokenizer","xml","sodium"] as $e) { if (!extension_loaded($e)) echo $e." "; }' 2>/dev/null || echo 'unknown')"
+              echo "Skip PHP: $candidate (missing Laravel extensions)"
             done
             if [ -z "$PHP_BIN" ]; then
               echo "ERROR: No PHP with Laravel extensions. Set secret GENX_PHP_BIN (e.g. /usr/local/lsws/lsphp83/bin/php)."
               ls -la /usr/local/lsws/lsphp*/bin/php 2>/dev/null || true
               exit 1
             fi
-            echo "Using PHP: $PHP_BIN — $($PHP_BIN -v | head -1)"
+            PHP_VERSION="$("$PHP_BIN" -v 2>/dev/null | head -1)"
+            echo "Using PHP: $PHP_BIN - $PHP_VERSION"
 
             APP_ROOT="/home/$REMOTE_DOMAIN/public_html/$REMOTE_APP_DIR"
             PUBLIC_ROOT="/home/$REMOTE_DOMAIN/public_html"
