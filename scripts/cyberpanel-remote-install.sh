@@ -92,9 +92,10 @@ export COMPOSER_ALLOW_SUPERUSER=1
 "$PHP_BIN" artisan config:clear --no-interaction || true
 
 if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
-  DB_CONN="$(grep -E '^[[:space:]]*DB_CONNECTION=' .env | tail -1 | cut -d= -f2- | tr -d ' "' || true)"
+  # Strip CRLF and surrounding whitespace (Windows-saved .env often leaves \r on the value).
+  DB_CONN="$(grep -E '^[[:space:]]*DB_CONNECTION=' .env | tail -1 | cut -d= -f2- | tr -d '\r' | xargs)"
   if [ "$DB_CONN" != "mysql" ]; then
-    echo "ERROR: DB_CONNECTION must be mysql in .env (found: ${DB_CONN:-unset})."
+    echo "ERROR: DB_CONNECTION must be mysql in .env (found: [${DB_CONN:-unset}])."
     exit 1
   fi
   if [ "$DB_CONN" = "mysql" ] && [ -f database/database.sqlite ]; then
