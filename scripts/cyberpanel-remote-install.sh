@@ -102,6 +102,12 @@ if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
     rm -f database/database.sqlite
   fi
   "$PHP_BIN" artisan migrate --force --no-interaction
+  # Inventory tables (inventory_item_categories, purchase_locations, …) only exist when
+  # the module is enabled in storage/app/modules_statuses.json and module migrations run.
+  echo "Ensuring Inventory module is enabled, then running module migrations..."
+  if ! "$PHP_BIN" artisan module:enable Inventory --no-interaction; then
+    echo "::warning::module:enable Inventory returned non-zero (often OK if already enabled)."
+  fi
   "$PHP_BIN" artisan module:migrate --force --no-interaction
   "$PHP_BIN" artisan tinker --execute="foreach (['global_settings','pusher_settings','migrations','inventory_item_categories','purchase_locations'] as \$t) { if (!Schema::hasTable(\$t)) { echo 'Missing table: '.\$t.PHP_EOL; exit(1); } } echo 'Database schema OK'.PHP_EOL;"
 fi
