@@ -79,16 +79,13 @@ Route::group(['prefix' => 'restaurant'], function () {
     Route::get('/orders-success/{id}', [ShopController::class, 'orderSuccess'])->name('order_success');
 });
 
-Route::get('/restaurant/{hash}', [ShopController::class, 'cart'])->name('shop_restaurant');
-
-
-// Only register the root route if Subdomain module is not enabled
+// Only register when Subdomain module is off (module registers these with SubdomainCheck middleware).
 if (!function_exists('module_enabled') || !module_enabled('Subdomain')) {
+    Route::get('/restaurant/{hash}', [ShopController::class, 'cart'])->name('shop_restaurant');
     Route::get('/', [HomeController::class, 'landing'])->name('home')->middleware(DisableFrontend::class);
     Route::get('/change-locale/{locale}', [HomeController::class, 'changeLocale'])->name('change.locale');
+    Route::get('/restaurant-signup', [HomeController::class, 'signup'])->name('restaurant_signup');
 }
-
-Route::get('/restaurant-signup', [HomeController::class, 'signup'])->name('restaurant_signup');
 Route::get('/customer-logout', [HomeController::class, 'customerLogout'])->name('customer_logout');
 Route::get('page/{slug}', [CustomMenuController::class, 'index'])->name('customMenu');
 

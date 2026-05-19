@@ -14,7 +14,7 @@ use App\Http\Middleware\SuperAdmin;
 Route::group(['middleware' => ['web', SubdomainCheck::class]], function () {
 
     Route::get('/', [SubdomainController::class, 'shopIndex'])->name('shop_restaurant');
-    Route::get('/restaurant/{hash}', [SubdomainController::class, 'redirectHash'])->name('shop_restaurant');
+    Route::get('/restaurant/{hash}', [SubdomainController::class, 'redirectHash'])->name('shop_restaurant.redirect');
     Route::get('/quick-login/{hash}', [SubdomainController::class, 'quickLoginSubdomain'])->name('quick_login');
 
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login')->middleware('guest');
