@@ -54,7 +54,19 @@ class SubdomainCheck
             // Check if the url is login then do not redirect
             // https://abc.tabletrack.test/login
 
-            $ignore = ['login', 'password.request', 'password.reset', 'logout', 'home', 'shop_restaurant', 'quick_login', 'customer.display'];
+            $ignore = [
+                'login',
+                'super-admin.login',
+                'super-admin.login.store',
+                'password.request',
+                'password.reset',
+                'logout',
+                'home',
+                'shop_restaurant',
+                'shop_restaurant.redirect',
+                'quick_login',
+                'customer.display',
+            ];
 
 
 
@@ -111,6 +123,11 @@ class SubdomainCheck
         // Redirect to signup when from 325 page
         if ($routeName == 'restaurant_signup') {
             return redirect('//' . $root . '/restaurant-signup');
+        }
+
+        // Super-admin Fortify routes may be unnamed in some builds; never send them to /signin
+        if ($request->is('super-admin-login', 'super-admin-login/*')) {
+            return $next($request);
         }
 
         // If sub-domain do not exist in database then redirect to works

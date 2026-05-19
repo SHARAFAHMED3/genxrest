@@ -28,8 +28,12 @@ Route::group(['middleware' => ['web', SubdomainCheck::class]], function () {
 
     Route::get('/restaurant-signup', [HomeController::class, 'signup'])->name('restaurant_signup');
 
-    Route::get('/super-admin-login', [AuthenticatedSessionController::class, 'create'])->middleware('guest');
-    Route::post('/super-admin-login', [AuthenticatedSessionController::class, 'store'])->middleware('guest');
+    Route::get('/super-admin-login', [AuthenticatedSessionController::class, 'create'])
+        ->name('super-admin.login')
+        ->middleware('guest');
+    Route::post('/super-admin-login', [AuthenticatedSessionController::class, 'store'])
+        ->name('super-admin.login.store')
+        ->middleware('guest');
 });
 
 

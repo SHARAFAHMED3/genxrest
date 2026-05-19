@@ -318,17 +318,26 @@ if (!function_exists('global_setting')) {
     // @codingStandardsIgnoreLine
     function global_setting()
     {
+        // Never persist a null in cache: an empty table once would poison all later requests
+        // until the cache is cleared (500s on any view using global_setting()->…).
         if (cache()->has('global_setting')) {
-            return cache('global_setting');
+            $cached = cache('global_setting');
+            if ($cached !== null) {
+                return $cached;
+            }
+            cache()->forget('global_setting');
         }
 
         if (!\Illuminate\Support\Facades\Schema::hasTable('global_settings')) {
             return null;
         }
 
-        cache(['global_setting' => GlobalSetting::first()]);
+        $setting = GlobalSetting::first();
+        if ($setting !== null) {
+            cache(['global_setting' => $setting]);
+        }
 
-        return cache('global_setting');
+        return $setting;
     }
 }
 
